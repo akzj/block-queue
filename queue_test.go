@@ -1,6 +1,20 @@
+// Copyright 2020-2026 The streamIO Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package block_queue
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync/atomic"
@@ -48,7 +62,7 @@ func TestMultiGoroutine(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		time.Sleep(time.Second)
 		p := atomic.LoadInt64(&pos)
-		fmt.Println("items/second",p - last)
+		fmt.Println("items/second", p-last)
 		last = p
 	}
 }
@@ -60,7 +74,25 @@ func BenchmarkPushPop(b *testing.B) {
 	go func() {
 		for {
 			queue.Pop()
-			counts ++
+			counts++
+		}
+	}()
+	b.ReportAllocs()
+	b.N = 50000000
+	for i := 0; i < b.N; i++ {
+		queue.Push(i)
+	}
+	fmt.Println("items/second", int64(float64(counts)/time.Now().Sub(begin).Seconds()))
+}
+
+func BenchmarkPushPopContextQueue(b *testing.B) {
+	queue := NewQueueWithContext(context.Background(), 128)
+	begin := time.Now()
+	var counts int64
+	go func() {
+		for {
+			queue.Pop()
+			counts++
 		}
 	}()
 	b.ReportAllocs()
