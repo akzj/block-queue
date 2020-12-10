@@ -153,9 +153,12 @@ func (queue *QueueWithContext) IsClose() bool {
 	return atomic.LoadInt32(&queue.close) == 1
 }
 
-func (queue *QueueWithContext) fullWait() error {
+func (queue *QueueWithContext) fullWait(ctx context.Context) error {
 	queue.locker.Unlock()
 	select {
+	case <-ctx.Done():
+		queue.locker.Lock()
+		return ctx.Err()
 	case <-queue.full:
 		queue.locker.Lock()
 		return nil
@@ -179,7 +182,7 @@ func (queue *QueueWithContext) fullSignal() {
 	}
 }
 
-func (queue *QueueWithContext) emptyWait() error {
+func (queue *QueueWithContext) emptyWait(ctx context.Context) error {
 	queue.locker.Unlock()
 	select {
 	case <-queue.empty:
@@ -188,13 +191,16 @@ func (queue *QueueWithContext) emptyWait() error {
 	case <-queue.ctx.Done():
 		queue.locker.Lock()
 		return queue.ctx.Err()
+	case <-ctx.Done():
+		queue.locker.Lock()
+		return ctx.Err()
 	}
 }
 
-func (queue *QueueWithContext) Push(item interface{}) error {
+func (queue *QueueWithContext) PushWithCtx(ctx context.Context, item interface{}) error {
 	queue.locker.Lock()
 	for len(queue.items) >= queue.max {
-		if err := queue.fullWait(); err != nil {
+		if err := queue.fullWait(ctx); err != nil {
 			queue.locker.Unlock()
 			return err
 		}
@@ -205,10 +211,14 @@ func (queue *QueueWithContext) Push(item interface{}) error {
 	return nil
 }
 
-func (queue *QueueWithContext) pushMany(items []interface{}) ([]interface{}, error) {
+func (queue *QueueWithContext) Push(item interface{}) error {
+	return queue.PushWithCtx(context.Background(), item)
+}
+
+func (queue *QueueWithContext) pushManyWithCtx(ctx context.Context, items []interface{}) ([]interface{}, error) {
 	queue.locker.Lock()
 	for len(queue.items) >= queue.max {
-		if err := queue.fullWait(); err != nil {
+		if err := queue.fullWait(ctx); err != nil {
 			queue.locker.Unlock()
 			return items, err
 		}
@@ -221,6 +231,9 @@ func (queue *QueueWithContext) pushMany(items []interface{}) ([]interface{}, err
 	queue.locker.Unlock()
 	queue.emptySignal()
 	return items[remain:], nil
+}
+func (queue *QueueWithContext) pushMany(items []interface{}) ([]interface{}, error) {
+	return queue.pushManyWithCtx(context.Background(), items)
 }
 
 func (queue *QueueWithContext) PushManyWithoutBlock(items []interface{}) ([]interface{}, error) {
@@ -249,10 +262,10 @@ func (queue *QueueWithContext) PushMany(items []interface{}) error {
 	return nil
 }
 
-func (queue *QueueWithContext) Pop() (interface{}, error) {
+func (queue *QueueWithContext) PopWithCtx(ctx context.Context) (interface{}, error) {
 	queue.locker.Lock()
 	for len(queue.items) == 0 {
-		if err := queue.emptyWait(); err != nil && len(queue.items) == 0 {
+		if err := queue.emptyWait(ctx); err != nil && len(queue.items) == 0 {
 			queue.locker.Unlock()
 			return nil, err
 		}
@@ -271,11 +284,17 @@ func (queue *QueueWithContext) Pop() (interface{}, error) {
 	queue.fullSignal()
 	return item, nil
 }
+func (queue *QueueWithContext) Pop() (interface{}, error) {
+	return queue.PopWithCtx(context.Background())
+}
 
 func (queue *QueueWithContext) PopAll(buf []interface{}) (items []interface{}, err error) {
+	return queue.PopAllWithCtx(context.Background(), buf)
+}
+func (queue *QueueWithContext) PopAllWithCtx(ctx context.Context, buf []interface{}) (items []interface{}, err error) {
 	queue.locker.Lock()
 	for len(queue.items) == 0 {
-		if err := queue.emptyWait(); err != nil && len(queue.items) == 0 {
+		if err := queue.emptyWait(ctx); err != nil && len(queue.items) == 0 {
 			queue.locker.Unlock()
 			return nil, err
 		}
